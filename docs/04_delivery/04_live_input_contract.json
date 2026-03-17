@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "1.0.0",
+  "updatedAt": "2026-03-12",
+  "description": "Canonical live prerequisite contract for strict MVP nightly/RC lanes.",
+  "requiredChecks": [
+    {
+      "name": "api_base_url",
+      "env": ["BRANCHLINE_STAGING_API_BASE_URL", "BRANCHLINE_API_BASE_URL"],
+      "rule": "url_http_https",
+      "missingMessage": "missing BRANCHLINE_STAGING_API_BASE_URL/BRANCHLINE_API_BASE_URL"
+    },
+    {
+      "name": "auth_jwt_secret",
+      "env": ["AUTH_JWT_SECRET"],
+      "rule": "jwt_secret_strict",
+      "missingMessage": "missing AUTH_JWT_SECRET"
+    },
+    {
+      "name": "github_webhook_secret",
+      "env": ["GITHUB_WEBHOOK_SECRET"],
+      "rule": "min_length_8",
+      "missingMessage": "missing GITHUB_WEBHOOK_SECRET"
+    },
+    {
+      "name": "smoke_bearer_token",
+      "env": ["BRANCHLINE_SMOKE_BEARER_TOKEN"],
+      "rule": "min_length_20",
+      "missingMessage": "missing BRANCHLINE_SMOKE_BEARER_TOKEN"
+    },
+    {
+      "name": "github_installation_id",
+      "env": ["BRANCHLINE_GITHUB_INSTALLATION_ID"],
+      "rule": "positive_integer",
+      "missingMessage": "missing BRANCHLINE_GITHUB_INSTALLATION_ID"
+    }
+  ],
+  "probes": [
+    {
+      "name": "api_auth_probe",
+      "description": "Verify smoke bearer token authenticates against /auth/me."
+    },
+    {
+      "name": "github_status_probe",
+      "description": "Verify sandbox installation and repository mapping are reachable from /github/installations/status."
+    }
+  ]
+}

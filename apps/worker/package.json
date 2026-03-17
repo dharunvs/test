@@ -1,0 +1,26 @@
+{
+  "name": "@branchline/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "lint": "eslint \"src/**/*.ts\"",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@branchline/shared-events": "workspace:*",
+    "@prisma/client": "^6.4.1",
+    "bullmq": "^5.43.0",
+    "dotenv": "^16.4.5",
+    "execa": "^9.5.2",
+    "ioredis": "^5.5.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.3"
+  }
+}

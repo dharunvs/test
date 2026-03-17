@@ -1,0 +1,86 @@
+{
+  "version": "1.0",
+  "updatedAt": "2026-03-11",
+  "features": [
+    {
+      "feature": "F1",
+      "automated": { "id": "AT-F1-MEMBERSHIPS-RBAC", "type": "test", "ref": "apps/api-server/test/memberships.controller.spec.ts" },
+      "manual": { "id": "MR-F1-ONBOARD-TEAM", "runbookRef": "docs/04_delivery/03_manual_runbooks.md#mr-f1-onboard-team" }
+    },
+    {
+      "feature": "F2",
+      "automated": { "id": "AT-F2-GITHUB-WEBHOOK-IDEMPOTENCY-RETRY", "type": "test", "ref": "apps/api-server/test/github-app.controller.spec.ts" },
+      "manual": { "id": "MR-F2-GITHUB-INSTALL-SYNC", "runbookRef": "docs/04_delivery/03_manual_runbooks.md#mr-f2-github-install-sync" }
+    },
+    {
+      "feature": "F3",
+      "automated": { "id": "AT-F3-WORKSPACE-BINDING-VALIDATION", "type": "test", "ref": "apps/api-server/test/workspace-bindings.controller.spec.ts" },
+      "manual": { "id": "MR-F3-EXTENSION-LOGIN-BIND", "runbookRef": "docs/04_delivery/03_manual_runbooks.md#mr-f3-extension-login-bind" }
+    },
+    {
+      "feature": "F4",
+      "automated": { "id": "AT-F4-BRANCH-ORCHESTRATION", "type": "test", "ref": "apps/api-server/test/branches.service.spec.ts" },
+      "manual": { "id": "MR-F4-START-TASK-BRANCH-PR", "runbookRef": "docs/04_delivery/03_manual_runbooks.md#mr-f4-start-task-branch-pr" }
+    },
+    {
+      "feature": "F5",
+      "automated": { "id": "AT-F5-PROVENANCE-COMMIT-LINK", "type": "test", "ref": "apps/api-server/test/provenance.controller.spec.ts" },
+      "manual": { "id": "MR-F5-INTENT-TIMELINE-REVIEW", "runbookRef": "docs/04_delivery/03_manual_runbooks.md#mr-f5-intent-timeline-review" }
+    },
+    {
+      "feature": "F6",
+      "automated": { "id": "AT-F6-LIVE-ACTIVITY-FLOW", "type": "test", "ref": "apps/api-server/test/activity.controller.spec.ts" },
+      "manual": { "id": "MR-F6-LIVE-ACTIVITY-STREAM", "runbookRef": "docs/04_delivery/03_manual_runbooks.md#mr-f6-live-activity-stream" }
+    },
+    {
+      "feature": "F7",
+      "automated": { "id": "AT-F7-CONFLICT-SCORING-FLOW", "type": "test", "ref": "apps/api-server/test/conflicts.controller.spec.ts" },
+      "manual": { "id": "MR-F7-CONFLICT-CENTER-ACTIONS", "runbookRef": "docs/04_delivery/03_manual_runbooks.md#mr-f7-conflict-center-actions" }
+    },
+    {
+      "feature": "F8",
+      "automated": { "id": "AT-F8-GUARDRAIL-STAGE-BLOCKING-FLOW", "type": "test", "ref": "apps/api-server/test/guardrails.controller.spec.ts" },
+      "manual": { "id": "MR-F8-POLICY-YAML-INGEST-EVAL", "runbookRef": "docs/04_delivery/03_manual_runbooks.md#mr-f8-policy-yaml-ingest-eval" }
+    },
+    {
+      "feature": "F9",
+      "automated": { "id": "AT-F9-PIVOT-REPORT-FLOW", "type": "test", "ref": "apps/api-server/test/pivot.controller.spec.ts" },
+      "manual": { "id": "MR-F9-PIVOT-STALE-CONTEXT", "runbookRef": "docs/04_delivery/03_manual_runbooks.md#mr-f9-pivot-stale-context" }
+    },
+    {
+      "feature": "F10",
+      "automated": { "id": "AT-F10-PR-SLICE-QUEUE-FLOW", "type": "test", "ref": "apps/api-server/test/quality-gates.controller.spec.ts" },
+      "manual": { "id": "MR-F10-PR-SLICE-DIGEST", "runbookRef": "docs/04_delivery/03_manual_runbooks.md#mr-f10-pr-slice-digest" }
+    },
+    {
+      "feature": "F11",
+      "automated": { "id": "AT-F11-PROMOTION-QUALITY-GATE", "type": "test", "ref": "apps/api-server/test/branches.promote.spec.ts" },
+      "manual": { "id": "MR-F11-QUALITY-REQUIRED-CHECKS", "runbookRef": "docs/04_delivery/03_manual_runbooks.md#mr-f11-quality-required-checks" }
+    },
+    {
+      "feature": "F12",
+      "automated": { "id": "AT-F12-PROMPT-LIB-LIFECYCLE", "type": "test", "ref": "apps/api-server/test/prompt-library.controller.spec.ts" },
+      "manual": { "id": "MR-F12-PROMPT-ADOPTION-ANALYTICS", "runbookRef": "docs/04_delivery/03_manual_runbooks.md#mr-f12-prompt-adoption-analytics" }
+    },
+    {
+      "feature": "F13",
+      "automated": { "id": "AT-F13-HANDOFF-ACK-FLOW", "type": "test", "ref": "apps/api-server/test/handoffs.controller.spec.ts" },
+      "manual": { "id": "MR-F13-HANDOFF-RESUME", "runbookRef": "docs/04_delivery/03_manual_runbooks.md#mr-f13-handoff-resume" }
+    },
+    {
+      "feature": "F14",
+      "automated": { "id": "AT-F14-PROVENANCE-GRAPH-EXPORT", "type": "test", "ref": "apps/api-server/test/provenance.controller.spec.ts" },
+      "manual": { "id": "MR-F14-REPLAY-AUDIT-EXPORT", "runbookRef": "docs/04_delivery/03_manual_runbooks.md#mr-f14-replay-audit-export" }
+    },
+    {
+      "feature": "F15",
+      "automated": { "id": "AT-F15-INTEGRATION-OAUTH-LIFECYCLE", "type": "test", "ref": "apps/api-server/test/integrations.controller.spec.ts" },
+      "manual": { "id": "MR-F15-SLACK-LINEAR-JIRA-CONNECT", "runbookRef": "docs/04_delivery/03_manual_runbooks.md#mr-f15-slack-linear-jira-connect" }
+    },
+    {
+      "feature": "F16",
+      "automated": { "id": "AT-F16-AUDIT-REDACTION-IMMUTABILITY", "type": "test", "ref": "apps/api-server/test/audit.hash.spec.ts" },
+      "manual": { "id": "MR-F16-POLICY-RETENTION-VERIFY", "runbookRef": "docs/04_delivery/03_manual_runbooks.md#mr-f16-policy-retention-verify" }
+    }
+  ]
+}

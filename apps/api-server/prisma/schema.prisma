@@ -1,0 +1,1142 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrgRole {
+  owner
+  admin
+  member
+  viewer
+}
+
+enum ProjectRole {
+  admin
+  member
+  viewer
+}
+
+enum TaskStatus {
+  todo
+  in_progress
+  blocked
+  review
+  done
+  archived
+}
+
+enum BranchStatus {
+  active
+  stale
+  merged
+  closed
+  abandoned
+}
+
+enum PrStatus {
+  open
+  draft
+  merged
+  closed
+}
+
+enum QualityStatus {
+  queued
+  running
+  passed
+  failed
+  canceled
+}
+
+enum ConflictSeverity {
+  low
+  medium
+  high
+  critical
+}
+
+enum EventSource {
+  extension
+  web_console
+  worker
+  webhook
+}
+
+enum KnowledgeDocType {
+  brief
+  module_diagram
+  flow_diagram
+  architecture_notes
+  decision_log
+}
+
+enum KnowledgeDocStatus {
+  active
+  archived
+}
+
+enum KnowledgeApprovalStatus {
+  draft
+  approved
+  rejected
+  superseded
+}
+
+enum KnowledgeProposedByType {
+  user
+  llm
+  system
+}
+
+enum ProjectPhaseStatus {
+  planned
+  in_progress
+  blocked
+  completed
+  archived
+}
+
+model User {
+  id          String    @id @default(uuid())
+  clerkUserId String    @unique
+  email       String    @unique
+  displayName String?
+  avatarUrl   String?
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  ownedOrgs          Organization[]       @relation("OrganizationOwner")
+  orgMemberships     OrganizationMember[]
+  projectMemberships ProjectMember[]
+  deviceAuthSessions DeviceAuthSession[]
+  refreshTokens      RefreshToken[]
+  tasksCreated       Task[]               @relation("TaskCreatedBy")
+  tasksAssigned      Task[]               @relation("TaskAssignedTo")
+}
+
+model Organization {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  ownerUserId String
+  plan        String   @default("free")
+  settings    Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  owner               User                 @relation("OrganizationOwner", fields: [ownerUserId], references: [id])
+  members             OrganizationMember[]
+  projects            Project[]
+  repositories        Repository[]
+  githubInstallations GithubInstallation[]
+  tasks               Task[]
+  branches            Branch[]
+  auditLogs           AuditLog[]
+
+  @@index([ownerUserId])
+}
+
+model OrganizationMember {
+  id        String    @id @default(uuid())
+  orgId     String
+  userId    String
+  role      OrgRole
+  status    String    @default("active")
+  invitedBy String?
+  inviteExpiresAt DateTime?
+  acceptedAt DateTime?
+  revokedAt DateTime?
+  joinedAt  DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  organization Organization @relation(fields: [orgId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@unique([orgId, userId])
+  @@index([orgId, role])
+  @@index([userId])
+}
+
+model Project {
+  id                String   @id @default(uuid())
+  orgId             String
+  name              String
+  key               String
+  description       String?
+  defaultBaseBranch String   @default("main")
+  settings          Json
+  createdBy         String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  organization      Organization        @relation(fields: [orgId], references: [id])
+  members           ProjectMember[]
+  repositories      ProjectRepository[]
+  tasks             Task[]
+  policies          PolicySet[]
+  promptTemplates   PromptTemplate[]
+  knowledgeDocs     ProjectKnowledgeDoc[]
+  phases            ProjectPhase[]
+  pivotEvents       PivotEvent[]
+  branches          Branch[]
+  workspaceBindings WorkspaceBinding[]
+
+  @@unique([orgId, key])
+  @@index([orgId, createdAt])
+}
+
+model ProjectMember {
+  id        String      @id @default(uuid())
+  projectId String
+  userId    String
+  role      ProjectRole
+  status    String      @default("active")
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([projectId, userId])
+}
+
+model DeviceAuthSession {
+  id          String   @id @default(uuid())
+  deviceCode  String   @unique
+  userCode    String   @unique
+  userId      String?
+  email       String
+  role        OrgRole
+  clerkUserId String
+  status      String   @default("pending")
+  expiresAt   DateTime
+  approvedAt  DateTime?
+  exchangedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([status, expiresAt])
+  @@index([email])
+}
+
+model RefreshToken {
+  id                String   @id @default(uuid())
+  userId            String
+  tokenHash         String   @unique
+  expiresAt         DateTime
+  issuedAt          DateTime @default(now())
+  revokedAt         DateTime?
+  replacedByTokenId String?
+  userAgent         String?
+  ipAddress         String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user            User           @relation(fields: [userId], references: [id])
+  replacedByToken RefreshToken?  @relation("RefreshTokenChain", fields: [replacedByTokenId], references: [id])
+  previousTokens  RefreshToken[] @relation("RefreshTokenChain")
+
+  @@index([userId, expiresAt])
+  @@index([revokedAt])
+}
+
+model Repository {
+  id             String   @id @default(uuid())
+  orgId          String
+  provider       String
+  providerRepoId String
+  owner          String
+  name           String
+  fullName       String
+  defaultBranch  String
+  isPrivate      Boolean
+  metadata       Json
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization      Organization        @relation(fields: [orgId], references: [id])
+  projects          ProjectRepository[]
+  tasks             Task[]
+  branches          Branch[]
+  pullRequests      PullRequest[]
+  workspaceBindings WorkspaceBinding[]
+
+  @@unique([provider, providerRepoId])
+  @@index([orgId, provider])
+  @@index([fullName])
+}
+
+model ProjectRepository {
+  id           String   @id @default(uuid())
+  projectId    String
+  repositoryId String
+  isPrimary    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  project    Project    @relation(fields: [projectId], references: [id])
+  repository Repository @relation(fields: [repositoryId], references: [id])
+
+  @@unique([projectId, repositoryId])
+}
+
+model GithubInstallation {
+  id                   String    @id @default(uuid())
+  orgId                String
+  githubInstallationId BigInt    @unique
+  accountLogin         String
+  accountType          String
+  permissions          Json
+  installedByUserId    String?
+  installedAt          DateTime
+  uninstalledAt        DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  organization Organization @relation(fields: [orgId], references: [id])
+
+  @@index([orgId])
+}
+
+model GithubWebhookDelivery {
+  id             String    @id @default(uuid())
+  orgId          String?
+  deliveryId     String    @unique
+  eventName      String
+  signatureValid Boolean
+  payload        Json
+  status         String    @default("queued")
+  attemptCount   Int       @default(0)
+  nextRetryAt    DateTime?
+  processed      Boolean   @default(false)
+  processedAt    DateTime?
+  error          String?
+  createdAt      DateTime  @default(now())
+
+  @@index([orgId])
+  @@index([status, nextRetryAt])
+}
+
+model Task {
+  id                String     @id @default(uuid())
+  orgId             String
+  projectId         String
+  repositoryId      String
+  title             String
+  description       String?
+  status            TaskStatus @default(todo)
+  createdBy         String
+  assignedTo        String?
+  externalTicketRef String?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  organization         Organization          @relation(fields: [orgId], references: [id])
+  project              Project               @relation(fields: [projectId], references: [id])
+  repository           Repository            @relation(fields: [repositoryId], references: [id])
+  creator              User                  @relation("TaskCreatedBy", fields: [createdBy], references: [id])
+  assignee             User?                 @relation("TaskAssignedTo", fields: [assignedTo], references: [id])
+  branches             Branch[]
+  intentEvents         IntentEvent[]
+  activityEvents       ActivityEvent[]
+  aiRuns               AiRun[]
+  taskDecisions        TaskDecision[]
+  conflictEvents       ConflictEvent[]       @relation("ConflictTask")
+  otherConflictEvents  ConflictEvent[]       @relation("ConflictOtherTask")
+  guardrailEvaluations GuardrailEvaluation[]
+  qualityGateRuns      QualityGateRun[]
+  promptUsages         PromptUsage[]
+  ownershipClaims      OwnershipClaim[]
+  handoffPackets       HandoffPacket[]
+  replaySnapshots      ReplaySnapshot[]
+  prSlices             PrSlice[]
+
+  @@index([projectId, status])
+  @@index([assignedTo, status])
+  @@index([repositoryId, createdAt])
+}
+
+model Branch {
+  id                   String       @id @default(uuid())
+  orgId                String
+  projectId            String
+  repositoryId         String
+  taskId               String
+  createdBy            String
+  name                 String
+  baseBranch           String
+  headSha              String?
+  baseSha              String?
+  status               BranchStatus @default(active)
+  isProtectedViolation Boolean      @default(false)
+  staleReason          String?
+  mergedAt             DateTime?
+  closedAt             DateTime?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  organization         Organization          @relation(fields: [orgId], references: [id])
+  project              Project               @relation(fields: [projectId], references: [id])
+  repository           Repository            @relation(fields: [repositoryId], references: [id])
+  task                 Task                  @relation(fields: [taskId], references: [id])
+  pullRequests         PullRequest[]
+  intentEvents         IntentEvent[]
+  aiRuns               AiRun[]
+  guardrailEvaluations GuardrailEvaluation[]
+  qualityGateRuns      QualityGateRun[]
+  handoffPackets       HandoffPacket[]
+
+  @@unique([repositoryId, name])
+  @@index([taskId])
+  @@index([projectId, status])
+  @@index([repositoryId, status])
+}
+
+model PullRequest {
+  id             String    @id @default(uuid())
+  orgId          String
+  repositoryId   String
+  branchId       String
+  providerPrId   String
+  number         Int
+  url            String
+  title          String
+  status         PrStatus  @default(open)
+  isDraft        Boolean   @default(true)
+  mergeableState String?
+  openedBy       String?
+  openedAt       DateTime?
+  mergedBy       String?
+  mergedAt       DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  repository Repository @relation(fields: [repositoryId], references: [id])
+  branch     Branch     @relation(fields: [branchId], references: [id])
+  prSlices   PrSlice[]
+
+  @@unique([repositoryId, number])
+  @@index([branchId])
+  @@index([status, createdAt])
+}
+
+model IntentEvent {
+  id             String      @id @default(uuid())
+  orgId          String
+  projectId      String
+  taskId         String
+  branchId       String?
+  actorUserId    String?
+  source         EventSource
+  eventType      String
+  eventSeq       BigInt
+  payload        Json
+  redactionLevel String      @default("none")
+  occurredAt     DateTime
+  createdAt      DateTime    @default(now())
+
+  task   Task    @relation(fields: [taskId], references: [id])
+  branch Branch? @relation(fields: [branchId], references: [id])
+
+  @@unique([taskId, eventSeq])
+  @@index([taskId, occurredAt])
+  @@index([projectId, occurredAt])
+}
+
+model ActivityPresence {
+  id                 String   @id @default(uuid())
+  orgId              String
+  projectId          String
+  userId             String
+  workspaceBindingId String?
+  state              String
+  activeFilePath     String?
+  activeSymbol       String?
+  updatedFromEventId String?
+  lastSeenAt         DateTime
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([projectId, userId])
+  @@index([projectId, lastSeenAt])
+}
+
+model ActivityEvent {
+  id         String   @id @default(uuid())
+  orgId      String
+  projectId  String
+  taskId     String?
+  userId     String?
+  eventType  String
+  filePath   String?
+  symbol     String?
+  payload    Json
+  occurredAt DateTime
+  createdAt  DateTime @default(now())
+
+  task Task? @relation(fields: [taskId], references: [id])
+
+  @@index([projectId, occurredAt])
+  @@index([filePath, occurredAt])
+}
+
+model AiRun {
+  id           String    @id @default(uuid())
+  orgId        String
+  projectId    String
+  taskId       String
+  branchId     String?
+  provider     String
+  model        String
+  inputTokens  Int?
+  outputTokens Int?
+  latencyMs    Int?
+  costUsd      Decimal?
+  status       String
+  startedAt    DateTime
+  endedAt      DateTime?
+  createdAt    DateTime  @default(now())
+
+  task         Task          @relation(fields: [taskId], references: [id])
+  branch       Branch?       @relation(fields: [branchId], references: [id])
+  promptUsages PromptUsage[]
+
+  @@index([taskId, startedAt])
+  @@index([projectId, provider, model])
+}
+
+model TaskDecision {
+  id             String   @id @default(uuid())
+  orgId          String
+  projectId      String
+  taskId         String
+  decisionType   String
+  summary        String
+  rationale      String?
+  decidedBy      String?
+  relatedEventId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  task Task @relation(fields: [taskId], references: [id])
+
+  @@index([taskId, createdAt])
+}
+
+model ConflictEvent {
+  id               String           @id @default(uuid())
+  orgId            String
+  projectId        String
+  repositoryId     String
+  taskId           String?
+  otherTaskId      String?
+  severity         ConflictSeverity
+  score            Decimal
+  reasonCodes      String[]
+  filePaths        String[]
+  symbolNames      String[]
+  resolutionStatus String           @default("open")
+  resolvedBy       String?
+  resolvedAt       DateTime?
+  createdAt        DateTime         @default(now())
+
+  task      Task? @relation("ConflictTask", fields: [taskId], references: [id])
+  otherTask Task? @relation("ConflictOtherTask", fields: [otherTaskId], references: [id])
+
+  @@index([projectId, resolutionStatus, severity])
+}
+
+model OwnershipClaim {
+  id         String    @id @default(uuid())
+  orgId      String
+  projectId  String
+  taskId     String
+  userId     String
+  scopeType  String
+  scopeValue String
+  expiresAt  DateTime
+  releasedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  task Task @relation(fields: [taskId], references: [id])
+
+  @@index([projectId, scopeType, scopeValue])
+  @@index([expiresAt])
+}
+
+model PolicySet {
+  id        String   @id @default(uuid())
+  orgId     String
+  projectId String
+  name      String
+  version   Int
+  status    String
+  config    Json
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project     Project               @relation(fields: [projectId], references: [id])
+  rules       GuardrailRule[]
+  evaluations GuardrailEvaluation[]
+
+  @@unique([projectId, name, version])
+  @@index([projectId, status])
+}
+
+model GuardrailRule {
+  id          String   @id @default(uuid())
+  policySetId String
+  ruleKey     String
+  ruleType    String
+  severity    String
+  expression  Json
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  policySet PolicySet @relation(fields: [policySetId], references: [id])
+
+  @@unique([policySetId, ruleKey])
+}
+
+model GuardrailEvaluation {
+  id          String   @id @default(uuid())
+  orgId       String
+  projectId   String
+  taskId      String
+  branchId    String?
+  policySetId String
+  status      String
+  violations  Json
+  evaluatedAt DateTime
+  createdAt   DateTime @default(now())
+
+  task      Task      @relation(fields: [taskId], references: [id])
+  branch    Branch?   @relation(fields: [branchId], references: [id])
+  policySet PolicySet @relation(fields: [policySetId], references: [id])
+
+  @@index([taskId, evaluatedAt])
+  @@index([projectId, status])
+}
+
+model QualityGateRun {
+  id            String        @id @default(uuid())
+  orgId         String
+  projectId     String
+  taskId        String
+  branchId      String?
+  triggerSource String
+  status        QualityStatus @default(queued)
+  startedAt     DateTime?
+  endedAt       DateTime?
+  summary       Json
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  task   Task               @relation(fields: [taskId], references: [id])
+  branch Branch?            @relation(fields: [branchId], references: [id])
+  checks QualityGateCheck[]
+  artifacts QualityArtifact[]
+
+  @@index([taskId, createdAt])
+  @@index([projectId, status])
+}
+
+model QualityGateCheck {
+  id         String        @id @default(uuid())
+  runId      String
+  checkKey   String
+  status     QualityStatus
+  durationMs Int?
+  details    Json
+  logUrl     String?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  run QualityGateRun @relation(fields: [runId], references: [id])
+  artifacts QualityArtifact[]
+
+  @@unique([runId, checkKey])
+}
+
+model QualityArtifact {
+  id              String   @id @default(uuid())
+  runId           String
+  checkId         String?
+  artifactType    String
+  storageProvider String
+  storageKey      String
+  contentType     String?
+  sizeBytes       Int?
+  retentionClass  String   @default("standard")
+  metadata        Json
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  run   QualityGateRun   @relation(fields: [runId], references: [id])
+  check QualityGateCheck? @relation(fields: [checkId], references: [id])
+
+  @@index([runId, createdAt])
+  @@index([checkId])
+}
+
+model PrSlice {
+  id            String   @id @default(uuid())
+  orgId         String
+  projectId     String
+  taskId        String
+  pullRequestId String
+  sliceOrder    Int
+  title         String
+  description   String?
+  filePaths     String[]
+  riskLevel     String
+  status        String   @default("open")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  task        Task        @relation(fields: [taskId], references: [id])
+  pullRequest PullRequest @relation(fields: [pullRequestId], references: [id])
+
+  @@unique([pullRequestId, sliceOrder])
+  @@index([pullRequestId, sliceOrder])
+}
+
+model PromptTemplate {
+  id        String   @id @default(uuid())
+  orgId     String
+  projectId String?
+  name      String
+  slug      String
+  category  String
+  isActive  Boolean  @default(true)
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project  Project?                @relation(fields: [projectId], references: [id])
+  versions PromptTemplateVersion[]
+  usages   PromptUsage[]
+
+  @@unique([orgId, projectId, slug])
+}
+
+model PromptTemplateVersion {
+  id         String   @id @default(uuid())
+  templateId String
+  version    Int
+  content    String
+  variables  Json
+  changelog  String?
+  createdBy  String?
+  createdAt  DateTime @default(now())
+
+  template PromptTemplate @relation(fields: [templateId], references: [id])
+  usages   PromptUsage[]
+
+  @@unique([templateId, version])
+}
+
+model PromptUsage {
+  id                String   @id @default(uuid())
+  orgId             String
+  projectId         String?
+  taskId            String?
+  templateId        String?
+  templateVersionId String?
+  aiRunId           String?
+  usedBy            String?
+  successRating     Int?
+  createdAt         DateTime @default(now())
+
+  task            Task?                  @relation(fields: [taskId], references: [id])
+  template        PromptTemplate?        @relation(fields: [templateId], references: [id])
+  templateVersion PromptTemplateVersion? @relation(fields: [templateVersionId], references: [id])
+  aiRun           AiRun?                 @relation(fields: [aiRunId], references: [id])
+
+  @@index([templateId, createdAt])
+  @@index([projectId, createdAt])
+}
+
+model ProjectKnowledgeDoc {
+  id            String             @id @default(uuid())
+  orgId         String
+  projectId     String
+  type          KnowledgeDocType
+  slug          String
+  title         String
+  status        KnowledgeDocStatus @default(active)
+  activeVersion Int?
+  createdBy     String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  project  Project                   @relation(fields: [projectId], references: [id])
+  versions ProjectKnowledgeVersion[]
+
+  @@unique([projectId, slug])
+  @@index([projectId, type, updatedAt])
+}
+
+model ProjectKnowledgeVersion {
+  id             String                 @id @default(uuid())
+  docId          String
+  version        Int
+  contentMarkdown String?
+  mermaidSource  String?
+  changeSummary  String?
+  approvalStatus KnowledgeApprovalStatus @default(draft)
+  proposedBy     String?
+  proposedByType KnowledgeProposedByType @default(user)
+  approvedBy     String?
+  approvedAt     DateTime?
+  sourceTaskId   String?
+  sourceAiRunId  String?
+  baseVersion    Int?
+  createdAt      DateTime               @default(now())
+
+  doc ProjectKnowledgeDoc @relation(fields: [docId], references: [id])
+
+  @@unique([docId, version])
+  @@index([docId, approvalStatus, createdAt])
+}
+
+model ProjectPhase {
+  id             String           @id @default(uuid())
+  orgId          String
+  projectId      String
+  key            String
+  name           String
+  objective      String?
+  status         ProjectPhaseStatus @default(planned)
+  ownerUserId    String?
+  orderIndex     Int              @default(0)
+  plannedStartAt DateTime?
+  plannedEndAt   DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  project   Project                @relation(fields: [projectId], references: [id])
+  revisions ProjectPhaseRevision[]
+
+  @@unique([projectId, key])
+  @@index([projectId, orderIndex, status])
+}
+
+model ProjectPhaseRevision {
+  id             String                 @id @default(uuid())
+  phaseId        String
+  revision       Int
+  payload        Json
+  approvalStatus KnowledgeApprovalStatus @default(draft)
+  proposedBy     String?
+  proposedByType KnowledgeProposedByType @default(user)
+  approvedBy     String?
+  approvedAt     DateTime?
+  sourceTaskId   String?
+  sourceAiRunId  String?
+  baseRevision   Int?
+  createdAt      DateTime               @default(now())
+
+  phase ProjectPhase @relation(fields: [phaseId], references: [id])
+
+  @@unique([phaseId, revision])
+  @@index([phaseId, approvalStatus, createdAt])
+}
+
+model HandoffPacket {
+  id          String   @id @default(uuid())
+  orgId       String
+  projectId   String
+  taskId      String
+  branchId    String?
+  generatedBy String?
+  summary     String
+  constraints String?
+  risks       String?
+  nextSteps   String?
+  payload     Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  task   Task         @relation(fields: [taskId], references: [id])
+  branch Branch?      @relation(fields: [branchId], references: [id])
+  acks   HandoffAck[]
+
+  @@index([taskId, createdAt])
+}
+
+model HandoffAck {
+  id              String   @id @default(uuid())
+  handoffPacketId String
+  ackBy           String
+  ackAt           DateTime
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  handoffPacket HandoffPacket @relation(fields: [handoffPacketId], references: [id])
+
+  @@unique([handoffPacketId, ackBy])
+}
+
+model ReplaySnapshot {
+  id              String   @id @default(uuid())
+  orgId           String
+  projectId       String
+  taskId          String
+  snapshotVersion Int
+  snapshot        Json
+  artifactUrl     String?
+  createdAt       DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id])
+
+  @@unique([taskId, snapshotVersion])
+  @@index([taskId, snapshotVersion])
+}
+
+model PivotEvent {
+  id              String   @id @default(uuid())
+  orgId           String
+  projectId       String
+  triggeredBy     String?
+  title           String
+  description     String?
+  baselinePayload Json
+  effectiveAt     DateTime
+  createdAt       DateTime @default(now())
+
+  project      Project              @relation(fields: [projectId], references: [id])
+  staleReports StaleContextReport[]
+
+  @@index([projectId, effectiveAt])
+}
+
+model StaleContextReport {
+  id           String   @id @default(uuid())
+  pivotEventId String
+  entityType   String
+  entityId     String
+  reason       String
+  status       String   @default("open")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  pivotEvent PivotEvent @relation(fields: [pivotEventId], references: [id])
+
+  @@index([pivotEventId, status])
+}
+
+model IntegrationConnection {
+  id                   String   @id @default(uuid())
+  orgId                String
+  projectId            String?
+  provider             String
+  authType             String   @default("manual")
+  externalWorkspaceId  String?
+  encryptedCredentials Json
+  oauthScopes          Json?
+  oauthMetadata        Json?
+  tokenExpiresAt       DateTime?
+  refreshExpiresAt     DateTime?
+  lastErrorCode        String?
+  lastErrorMessage     String?
+  lastErrorAt          DateTime?
+  credentialVersion    Int      @default(1)
+  lastRotatedAt        DateTime?
+  lastHealthStatus     String   @default("unknown")
+  lastHealthCheckedAt  DateTime?
+  status               String   @default("active")
+  createdBy            String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  rotations IntegrationCredentialRotation[]
+  oauthSessions IntegrationOauthSession[]
+
+  @@index([orgId, provider, status])
+  @@index([status, updatedAt])
+}
+
+model IntegrationCredentialRotation {
+  id                  String   @id @default(uuid())
+  connectionId        String
+  rotatedBy           String?
+  previousFingerprint String?
+  nextFingerprint     String?
+  reason              String?
+  rotatedAt           DateTime @default(now())
+  createdAt           DateTime @default(now())
+
+  connection IntegrationConnection @relation(fields: [connectionId], references: [id])
+
+  @@index([connectionId, rotatedAt])
+}
+
+model IntegrationOauthSession {
+  id            String   @id @default(uuid())
+  state         String   @unique
+  provider      String
+  orgId         String
+  projectId     String?
+  connectionId  String
+  initiatedBy   String?
+  pkceVerifier  String?
+  redirectUri   String
+  returnUrl     String?
+  status        String   @default("pending")
+  failureReason String?
+  expiresAt     DateTime
+  consumedAt    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  connection IntegrationConnection @relation(fields: [connectionId], references: [id])
+
+  @@index([connectionId, status])
+  @@index([orgId, provider, status])
+  @@index([status, expiresAt])
+}
+
+model IntegrationLink {
+  id          String   @id @default(uuid())
+  orgId       String
+  projectId   String?
+  entityType  String
+  entityId    String
+  provider    String
+  externalRef String
+  metadata    Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([entityType, entityId])
+  @@index([provider, externalRef])
+}
+
+model Notification {
+  id              String    @id @default(uuid())
+  orgId           String
+  projectId       String?
+  userId          String?
+  channel         String
+  type            String
+  payload         Json
+  status          String    @default("queued")
+  sentAt          DateTime?
+  deliveredAt     DateTime?
+  failedAt        DateTime?
+  retryCount      Int       @default(0)
+  providerMessageId String?
+  lastError       String?
+  lastStatusCode  Int?
+  metadata        Json?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @default(now()) @updatedAt
+
+  @@index([userId, status, createdAt])
+  @@index([orgId, status, updatedAt])
+}
+
+model ExtensionClient {
+  id                 String   @id @default(uuid())
+  orgId              String?
+  userId             String?
+  machineFingerprint String?
+  extensionVersion   String
+  vscodeVersion      String?
+  os                 String?
+  lastSeenAt         DateTime
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  workspaceBindings WorkspaceBinding[]
+
+  @@index([userId, lastSeenAt])
+}
+
+model WorkspaceBinding {
+  id                String   @id @default(uuid())
+  orgId             String
+  projectId         String
+  repositoryId      String
+  userId            String
+  extensionClientId String?
+  workspaceHash     String
+  lastBoundAt       DateTime
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  project         Project          @relation(fields: [projectId], references: [id])
+  repository      Repository       @relation(fields: [repositoryId], references: [id])
+  extensionClient ExtensionClient? @relation(fields: [extensionClientId], references: [id])
+
+  @@unique([userId, workspaceHash])
+  @@index([projectId, userId])
+}
+
+model RedactionPolicy {
+  id                 String   @id @default(uuid())
+  orgId              String
+  capturePromptText  Boolean  @default(true)
+  captureCodeSnippets Boolean @default(true)
+  redactionPatterns  Json
+  status             String   @default("active")
+  createdBy          String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([orgId, status, updatedAt])
+}
+
+model RetentionPolicy {
+  id                    String   @id @default(uuid())
+  orgId                 String
+  projectId             String?
+  intentEventsDays      Int      @default(90)
+  activityEventsDays    Int      @default(30)
+  qualityArtifactsDays  Int      @default(30)
+  auditLogsDays         Int      @default(365)
+  status                String   @default("active")
+  createdBy             String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([orgId, projectId, status, updatedAt])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  orgId       String
+  projectId   String?
+  actorUserId String?
+  actorType   String
+  eventType   String
+  entityType  String?
+  entityId    String?
+  ipAddress   String?
+  userAgent   String?
+  payload     Json
+  occurredAt  DateTime
+  hash        String
+  createdAt   DateTime @default(now())
+
+  organization Organization @relation(fields: [orgId], references: [id])
+
+  @@index([orgId, occurredAt])
+  @@index([projectId, occurredAt])
+  @@index([eventType, occurredAt])
+}

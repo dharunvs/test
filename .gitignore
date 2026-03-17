@@ -1,0 +1,12 @@
+node_modules
+.pnpm-store
+.turbo
+.env
+.env.*
+dist
+coverage
+.next
+.vscode-test
+artifacts
+*.log
+.DS_Store

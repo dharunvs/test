@@ -1,0 +1,223 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["rc-*"]
+  pull_request:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      run_live_smoke:
+        description: "Run live-stack and provider smoke gates"
+        required: false
+        default: "false"
+      run_mvp_signoff_iteration:
+        description: "Run strict MVP signoff iteration (3 nightly + 1 rc + 1 partner-like pilot)"
+        required: false
+        default: "false"
+
+jobs:
+  checks:
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/'))
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: branchline
+          POSTGRES_PASSWORD: branchline
+          POSTGRES_DB: branchline
+        options: >-
+          --health-cmd "pg_isready -U branchline -d branchline"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+    env:
+      DATABASE_URL: postgresql://branchline:branchline@localhost:5432/branchline
+      SHADOW_DATABASE_URL: postgresql://branchline:branchline@localhost:5432/postgres
+      REDIS_URL: redis://localhost:6379
+      AUTH_JWT_SECRET: branchline-ci-auth-secret-0001
+      GITHUB_WEBHOOK_SECRET: branchline-ci-webhook-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile=false
+      - run: pnpm security:scan
+      - run: pnpm security:audit
+      - run: pnpm lint:verify-scripts
+      - run: pnpm test:scripts
+      - run: pnpm feature-gates:verify
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm --filter @branchline/api-server prisma:generate
+      - run: pnpm --filter @branchline/api-server exec prisma validate
+      - run: pnpm --filter @branchline/api-server exec prisma migrate deploy
+      - run: pnpm --filter @branchline/api-server exec prisma migrate status
+      - run: pnpm --filter @branchline/api-server exec prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url "${SHADOW_DATABASE_URL}" --exit-code
+
+  e2e_web:
+    runs-on: ubuntu-latest
+    needs: checks
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/'))
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile=false
+      - run: pnpm --filter @branchline/web-console exec playwright install chromium
+      - run: pnpm e2e:web
+
+  e2e_extension:
+    runs-on: ubuntu-latest
+    needs: checks
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/'))
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile=false
+      - run: sudo apt-get update && sudo apt-get install -y xvfb
+      - run: xvfb-run -a pnpm e2e:extension
+
+  live_stack_provider_smoke:
+    if: github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/rc-') || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_live_smoke == 'true')
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: branchline
+          POSTGRES_PASSWORD: branchline
+          POSTGRES_DB: branchline
+        options: >-
+          --health-cmd "pg_isready -U branchline -d branchline"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+    env:
+      DATABASE_URL: postgresql://branchline:branchline@localhost:5432/branchline
+      SHADOW_DATABASE_URL: postgresql://branchline:branchline@localhost:5432/postgres
+      REDIS_URL: redis://localhost:6379
+      BRANCHLINE_API_BASE_URL: ${{ secrets.BRANCHLINE_STAGING_API_BASE_URL }}
+      BRANCHLINE_STAGING_API_BASE_URL: ${{ secrets.BRANCHLINE_STAGING_API_BASE_URL }}
+      BRANCHLINE_LIVE_CONTRACT_PATH: docs/04_delivery/04_live_input_contract.json
+      AUTH_JWT_SECRET: ${{ secrets.AUTH_JWT_SECRET }}
+      GITHUB_WEBHOOK_SECRET: ${{ secrets.GITHUB_WEBHOOK_SECRET }}
+      BRANCHLINE_SMOKE_BEARER_TOKEN: ${{ secrets.BRANCHLINE_SMOKE_BEARER_TOKEN }}
+      BRANCHLINE_E2E_BEARER_TOKEN: ${{ secrets.BRANCHLINE_SMOKE_BEARER_TOKEN }}
+      BRANCHLINE_GITHUB_INSTALLATION_ID: ${{ secrets.BRANCHLINE_GITHUB_INSTALLATION_ID }}
+      BRANCHLINE_LIVE_ORG_ID: ${{ secrets.BRANCHLINE_LIVE_ORG_ID }}
+      BRANCHLINE_LIVE_PROJECT_ID: ${{ secrets.BRANCHLINE_LIVE_PROJECT_ID }}
+      BRANCHLINE_CI_LANE: ${{ startsWith(github.ref, 'refs/tags/rc-') && 'rc' || 'nightly' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile=false
+      - run: pnpm --filter @branchline/web-console exec playwright install chromium
+      - run: sudo apt-get update && sudo apt-get install -y xvfb
+      - run: pnpm --filter @branchline/api-server prisma:generate
+      - run: pnpm --filter @branchline/api-server exec prisma migrate deploy
+      - run: pnpm live:preflight --strict --lane=${BRANCHLINE_CI_LANE} --gitSha=${{ github.sha }} --contract=${BRANCHLINE_LIVE_CONTRACT_PATH} --output=artifacts/live-e2e/live-prereqs-static.json
+      - run: pnpm live:preflight --strict --probe-api --probe-github-status --fixtures=artifacts/live-e2e/fixtures.json --lane=${BRANCHLINE_CI_LANE} --gitSha=${{ github.sha }} --contract=${BRANCHLINE_LIVE_CONTRACT_PATH} --output=artifacts/live-e2e/live-prereqs-probe.json
+      - run: xvfb-run -a pnpm mvp:gate:live --lane=${BRANCHLINE_CI_LANE} --gitSha=${{ github.sha }} --outputRoot=artifacts/mvp-gate
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-stack-smoke-artifacts
+          path: artifacts
+
+  mvp_signoff_iteration:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_mvp_signoff_iteration == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: branchline
+          POSTGRES_PASSWORD: branchline
+          POSTGRES_DB: branchline
+        options: >-
+          --health-cmd "pg_isready -U branchline -d branchline"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+    env:
+      DATABASE_URL: postgresql://branchline:branchline@localhost:5432/branchline
+      SHADOW_DATABASE_URL: postgresql://branchline:branchline@localhost:5432/postgres
+      REDIS_URL: redis://localhost:6379
+      BRANCHLINE_API_BASE_URL: ${{ secrets.BRANCHLINE_STAGING_API_BASE_URL }}
+      BRANCHLINE_STAGING_API_BASE_URL: ${{ secrets.BRANCHLINE_STAGING_API_BASE_URL }}
+      BRANCHLINE_LIVE_CONTRACT_PATH: docs/04_delivery/04_live_input_contract.json
+      AUTH_JWT_SECRET: ${{ secrets.AUTH_JWT_SECRET }}
+      GITHUB_WEBHOOK_SECRET: ${{ secrets.GITHUB_WEBHOOK_SECRET }}
+      BRANCHLINE_SMOKE_BEARER_TOKEN: ${{ secrets.BRANCHLINE_SMOKE_BEARER_TOKEN }}
+      BRANCHLINE_E2E_BEARER_TOKEN: ${{ secrets.BRANCHLINE_SMOKE_BEARER_TOKEN }}
+      BRANCHLINE_GITHUB_INSTALLATION_ID: ${{ secrets.BRANCHLINE_GITHUB_INSTALLATION_ID }}
+      BRANCHLINE_LIVE_ORG_ID: ${{ secrets.BRANCHLINE_LIVE_ORG_ID }}
+      BRANCHLINE_LIVE_PROJECT_ID: ${{ secrets.BRANCHLINE_LIVE_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile=false
+      - run: pnpm --filter @branchline/web-console exec playwright install chromium
+      - run: sudo apt-get update && sudo apt-get install -y xvfb
+      - run: pnpm --filter @branchline/api-server prisma:generate
+      - run: pnpm --filter @branchline/api-server exec prisma migrate deploy
+      - run: pnpm live:preflight --strict --lane=nightly --gitSha=${{ github.sha }} --contract=${BRANCHLINE_LIVE_CONTRACT_PATH} --output=artifacts/live-e2e/live-prereqs-static.json
+      - run: pnpm live:preflight --strict --probe-api --probe-github-status --fixtures=artifacts/live-e2e/fixtures.json --lane=nightly --gitSha=${{ github.sha }} --contract=${BRANCHLINE_LIVE_CONTRACT_PATH} --output=artifacts/live-e2e/live-prereqs-probe.json
+      - run: xvfb-run -a pnpm mvp:signoff:iteration --strict --nightlyRuns=3 --gitSha=${{ github.sha }} --outputRoot=artifacts/mvp-signoff --gateOutputRoot=artifacts/mvp-gate-signoff
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mvp-signoff-iteration-artifacts
+          path: artifacts
