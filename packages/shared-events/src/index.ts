@@ -13,14 +13,7 @@ export const socketEventNames = [
 export type SocketEventName = (typeof socketEventNames)[number];
 
 export const queueTopics = [
-  "queue.intent.normalize",
-  "queue.conflict.score",
-  "queue.guardrail.evaluate",
-  "queue.quality.run",
-  "queue.pr.slice",
-  "queue.handoff.generate",
-  "queue.notifications.dispatch",
-  "queue.analytics.rollup"
+  "queue.intent.normalize"
 ] as const;
 
 export type QueueTopic = (typeof queueTopics)[number];

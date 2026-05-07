@@ -1,16 +1,7 @@
 import { Queue, Worker } from "bullmq";
 
 import { readWorkerEnv } from "./env.js";
-import {
-  processAnalyticsRollup,
-  processConflictScore,
-  processGuardrailEvaluate,
-  processHandoffGenerate,
-  processIntentNormalize,
-  processNotificationsDispatch,
-  processPrSlice,
-  processQualityRun
-} from "./processors/processors.js";
+import { processIntentNormalize } from "./processors/processors.js";
 
 const env = readWorkerEnv();
 const redisUrl = env.redisUrl;
@@ -20,14 +11,7 @@ const deadLetterQueue = new Queue("queue.dead_letter", {
 });
 
 const workers = [
-  new Worker("queue.intent.normalize", processIntentNormalize, { connection }),
-  new Worker("queue.conflict.score", processConflictScore, { connection }),
-  new Worker("queue.guardrail.evaluate", processGuardrailEvaluate, { connection }),
-  new Worker("queue.quality.run", processQualityRun, { connection }),
-  new Worker("queue.pr.slice", processPrSlice, { connection }),
-  new Worker("queue.handoff.generate", processHandoffGenerate, { connection }),
-  new Worker("queue.notifications.dispatch", processNotificationsDispatch, { connection }),
-  new Worker("queue.analytics.rollup", processAnalyticsRollup, { connection })
+  new Worker("queue.intent.normalize", processIntentNormalize, { connection })
 ];
 
 for (const worker of workers) {

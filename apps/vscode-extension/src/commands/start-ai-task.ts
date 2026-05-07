@@ -1,10 +1,7 @@
-import { randomUUID } from "node:crypto";
-
 import * as vscode from "vscode";
 
 import { getValidAccessToken } from "./login.js";
 import {
-  appendCommitMetadataTrailers,
   createAndCheckoutBranch,
   getHeadCommitSha,
   getCurrentGitBranch,
@@ -13,8 +10,7 @@ import {
   pushBranch
 } from "../services/branch-orchestrator.js";
 import { ApiClient } from "../services/api-client.js";
-import { buildIntentEvent } from "../services/event-emitter.js";
-import { nextIntentSequence } from "../services/intent-sequence.js";
+import { enqueueIntentCapture, flushPendingIntentCaptures } from "../services/intent-capture-queue.js";
 import { getWorkspaceBinding } from "../services/workspace-binding.js";
 
 const API_BASE_URL = process.env.BRANCHLINE_API_BASE_URL ?? "http://localhost:4000/v1";
@@ -25,7 +21,6 @@ function normalizeRepoFullNameFromRemote(url: string): string | undefined {
     return undefined;
   }
 
-  // Supports: git@github.com:owner/repo.git and https://github.com/owner/repo.git
   const sshMatch = trimmed.match(/github\.com:([^/]+)\/(.+?)(?:\.git)?$/);
   if (sshMatch) {
     return `${sshMatch[1]}/${sshMatch[2]}`;
@@ -62,6 +57,32 @@ export async function runStartAiTask(context: vscode.ExtensionContext): Promise<
       });
 
   if (!taskTitle || taskTitle.trim().length === 0) {
+    return;
+  }
+
+  const configuredPrompt = process.env.BRANCHLINE_E2E_INTENT_PROMPT?.trim();
+  const prompt = configuredPrompt
+    ? configuredPrompt
+    : await vscode.window.showInputBox({
+        title: "Prompt Used",
+        placeHolder: "What prompt did you use with AI?",
+        ignoreFocusOut: true
+      });
+
+  if (!prompt || prompt.trim().length === 0) {
+    return;
+  }
+
+  const configuredSummary = process.env.BRANCHLINE_E2E_INTENT_SUMMARY?.trim();
+  const summary = configuredSummary
+    ? configuredSummary
+    : await vscode.window.showInputBox({
+        title: "AI Output Summary",
+        placeHolder: "Summarize AI output in one sentence",
+        ignoreFocusOut: true
+      });
+
+  if (!summary || summary.trim().length === 0) {
     return;
   }
 
@@ -105,26 +126,6 @@ export async function runStartAiTask(context: vscode.ExtensionContext): Promise<
     title: taskTitle
   });
 
-  const changedPaths = await listChangedPaths(workspaceFolder);
-  if (changedPaths.length > 0) {
-    const guardrailResult = await api.evaluateGuardrails({
-      projectId: binding.projectId,
-      taskId: task.id,
-      stage: "pre_apply",
-      changedPaths
-    });
-
-    if (guardrailResult.blocking) {
-      const firstViolation = guardrailResult.violations[0];
-      vscode.window.showErrorMessage(
-        firstViolation
-          ? `Guardrail blocked task start (${guardrailResult.stage}): ${firstViolation.message}`
-          : "Guardrail policy blocked task start."
-      );
-      return;
-    }
-  }
-
   const branchResponse = await api.createBranch({
     projectId: binding.projectId,
     taskId: task.id,
@@ -146,77 +147,41 @@ export async function runStartAiTask(context: vscode.ExtensionContext): Promise<
     branchResponse.policy.baseBranch
   );
 
-  const runId = randomUUID();
-  const intentId = randomUUID();
-
-  await appendCommitMetadataTrailers(workspaceFolder, runId, task.id, intentId);
-  const commitSha = await getHeadCommitSha(workspaceFolder);
-
-  if (commitSha) {
-    await api.ingestCommitMetadata({
-      orgId: binding.orgId,
-      projectId: binding.projectId,
-      taskId: task.id,
-      branchId: branchResponse.branch.id,
-      runId,
-      intentId,
-      commitSha,
-      provider: "extension",
-      model: "local"
-    });
-  }
-
-  let ensuredPullRequest = branchResponse.pullRequest ?? null;
-
   if (branchResponse.policy.autoPush) {
     await pushBranch(workspaceFolder, branchResponse.branch.name);
-
-    if (branchResponse.policy.autoPr) {
-      try {
-        const ensured = await api.ensureBranchPullRequest(branchResponse.branch.id, {
-          title: `AI Task: ${taskTitle}`,
-          draft: true
-        });
-        ensuredPullRequest = ensured.pullRequest;
-
-        if (!ensured.pullRequest && ensured.reason) {
-          vscode.window.showWarningMessage(`Branchline auto-PR could not be ensured: ${ensured.reason}`);
-        }
-      } catch (error) {
-        vscode.window.showWarningMessage(
-          `Branchline auto-PR request failed: ${error instanceof Error ? error.message : "unknown error"}`
-        );
-      }
-    }
   }
 
-  const intentEvent = buildIntentEvent({
-    orgId: binding.orgId,
-    projectId: binding.projectId,
-    repositoryId: binding.repositoryId,
-    taskId: task.id,
-    branchId: branchResponse.branch.id,
-    type: "intent.task_started",
-    payload: {
-      taskTitle,
-      fromBranch: currentBranch,
-      createdBranch: branchResponse.branch.name,
-      runId,
-      intentId,
-      pullRequestId: ensuredPullRequest?.id
-    },
-    sequence: await nextIntentSequence(context, task.id)
-  });
+  const changedPaths = await listChangedPaths(workspaceFolder);
+  const commitId = (await getHeadCommitSha(workspaceFolder)) ?? "uncommitted";
+  const files = changedPaths.length > 0 ? changedPaths : ["(none)"];
 
-  await api.sendIntentEvent(intentEvent);
+  await flushPendingIntentCaptures(context, api);
 
-  await context.workspaceState.update("branchline.currentRunId", runId);
+  try {
+    await api.captureIntent({
+      taskId: task.id,
+      prompt: prompt.trim(),
+      summary: summary.trim(),
+      files,
+      commitId
+    });
+  } catch (error) {
+    await enqueueIntentCapture(context, {
+      taskId: task.id,
+      prompt: prompt.trim(),
+      summary: summary.trim(),
+      files,
+      commitId,
+      queuedAt: new Date().toISOString()
+    });
+    vscode.window.showWarningMessage(
+      `Intent capture queued offline: ${error instanceof Error ? error.message : "unknown error"}`
+    );
+  }
+
   await context.workspaceState.update("branchline.currentTaskId", task.id);
   await context.workspaceState.update("branchline.currentBranchId", branchResponse.branch.id);
 
-  vscode.window.showInformationMessage(
-    ensuredPullRequest
-      ? `Branchline task started on ${branchResponse.branch.name} (PR #${ensuredPullRequest.number} prepared).`
-      : `Branchline task started on ${branchResponse.branch.name}.`
-  );
+  vscode.window.showInformationMessage(`Branchline task started on ${branchResponse.branch.name}.`);
 }
+

@@ -18,16 +18,7 @@ describe("contract locks", () => {
   });
 
   it("keeps queue topic contract locked", () => {
-    expect(queueTopics).toEqual([
-      "queue.intent.normalize",
-      "queue.conflict.score",
-      "queue.guardrail.evaluate",
-      "queue.quality.run",
-      "queue.pr.slice",
-      "queue.handoff.generate",
-      "queue.notifications.dispatch",
-      "queue.analytics.rollup"
-    ]);
+    expect(queueTopics).toEqual(["queue.intent.normalize"]);
   });
 
   it("exposes task-room realtime join/leave handlers", () => {

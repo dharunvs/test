@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { EmptyStatePanel, SectionHeader, SurfaceCard } from "../../components/ui-primitives";
 import { resolveActiveScope } from "../../lib/api";
 
 export default async function ProjectsPage() {
@@ -10,23 +10,51 @@ export default async function ProjectsPage() {
     error: error instanceof Error ? error.message : "Unknown error"
   }));
 
+  const projects = "projects" in scope ? scope.projects : [];
+
   return (
-    <section className="card">
-      <h1>Projects</h1>
-      <p>Project-level controls for branch policies and AI workflow behavior.</p>
-      {"error" in scope ? <p>{scope.error}</p> : null}
-      <ul>
-        {"projects" in scope &&
-          scope.projects.map((project) => (
-          <li key={project.id}>
-            <strong>{project.name}</strong> ({project.key}) - base {project.defaultBaseBranch ?? "main"}
-            {" - "}
-            <Link href={`/projects/${project.id}/policy`}>policy</Link>
-            {" - "}
-            <Link href={`/projects/${project.id}/knowledge` as never}>knowledge hub</Link>
-          </li>
-          ))}
-      </ul>
+    <section className="page-stack">
+      <SurfaceCard>
+        <SectionHeader
+          title="Projects"
+          subtitle="Manage project scope used by extension task creation and timeline capture."
+        />
+      </SurfaceCard>
+
+      {"error" in scope ? <p className="banner banner-error">{scope.error}</p> : null}
+
+      {projects.length === 0 ? (
+        <EmptyStatePanel
+          title="No projects available"
+          description="Create a project from the Onboarding page, then return here to set your active scope."
+        />
+      ) : (
+        <div className="project-grid">
+          {projects.map((project) => {
+            const isActive = project.id === scope.projectId;
+            return (
+              <article key={project.id} className="project-card">
+                <div className="project-card-header">
+                  <h2>{project.name}</h2>
+                  <span className="key-badge">{project.key}</span>
+                </div>
+                <div>
+                  <div className="meta-row">
+                    <span>Default branch</span>
+                    <strong>{project.defaultBaseBranch ?? "main"}</strong>
+                  </div>
+                  <div className="meta-row">
+                    <span>Status</span>
+                    <span className={isActive ? "status-badge status-badge-active" : "status-badge"}>
+                      {isActive ? "Active" : "Available"}
+                    </span>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }

@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 
 import { getValidAccessToken } from "./login.js";
 import { ApiClient } from "../services/api-client.js";
+import { flushPendingIntentCaptures } from "../services/intent-capture-queue.js";
 
 const API_BASE_URL = process.env.BRANCHLINE_API_BASE_URL ?? "http://localhost:4000/v1";
 
@@ -25,24 +26,27 @@ export async function runViewTimeline(context: vscode.ExtensionContext): Promise
   }
 
   const api = new ApiClient(API_BASE_URL, token);
-  const timeline = await api.fetchTaskTimeline(taskId);
+  await flushPendingIntentCaptures(context, api);
+  const timeline = await api.fetchIntentTimeline(taskId, 5);
 
   const markdown = [
-    "# Branchline Timeline",
+    "# Branchline Intent Timeline",
     "",
     `- Task: \`${timeline.taskId}\``,
-    timeline.counts
-      ? `- Counts: intent=${timeline.counts.intentEvents}, decisions=${timeline.counts.decisions}, activity=${timeline.counts.activityEvents}, quality=${timeline.counts.qualityRuns}, handoffs=${timeline.counts.handoffs}, conflicts=${timeline.counts.conflicts}, branches=${timeline.counts.branches}`
-      : null,
+    `- Events loaded: ${timeline.events.length}`,
     "",
-    "## Events",
-    ...timeline.timeline.map(
-      (entry, index) =>
-        `${index + 1}. \`${new Date(entry.timestamp).toLocaleString()}\` - \`${entry.category}\` - \`${entry.type}\` (\`${entry.id}\`)`
+    "## Last 5 Events",
+    ...timeline.events.map((entry, index) =>
+      [
+        `${index + 1}. \`${new Date(entry.timestamp).toLocaleString()}\``,
+        `   - Commit: \`${entry.commitId}\``,
+        `   - Prompt: ${entry.prompt || "(redacted/empty)"}`,
+        `   - AI Output: ${entry.summary || "(redacted/empty)"}`,
+        `   - Files: ${entry.files.join(", ") || "none"}`,
+        `   - Redaction: ${entry.redactionLevel}`
+      ].join("\n")
     )
-  ]
-    .filter((line): line is string => Boolean(line))
-    .join("\n");
+  ].join("\n");
 
   const document = await vscode.workspace.openTextDocument({
     language: "markdown",

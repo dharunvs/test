@@ -33,28 +33,66 @@ export async function clearStoredAuth(context: vscode.ExtensionContext): Promise
 }
 
 export async function runLogin(context: vscode.ExtensionContext): Promise<void> {
-  const e2eEmail = process.env.BRANCHLINE_E2E_EMAIL?.trim();
-  const email =
-    e2eEmail && e2eEmail.length > 0
-      ? e2eEmail
-      : await vscode.window.showInputBox({
-          title: "Branchline account email",
-          placeHolder: "you@company.com (optional in dev)",
-          ignoreFocusOut: true
-        });
-
   const api = new ApiClient(API_BASE_URL);
-  const start = await api.startDeviceAuth({
-    email: email || undefined,
-    role: "member"
-  });
+  const e2eEmail = process.env.BRANCHLINE_E2E_EMAIL?.trim();
+  const interactiveGithubSignin = process.env.BRANCHLINE_E2E_SKIP_BROWSER !== "1";
 
-  if (process.env.BRANCHLINE_E2E_SKIP_BROWSER !== "1") {
+  if (!e2eEmail && process.env.BRANCHLINE_DISABLE_VSCODE_GITHUB_AUTH !== "1") {
+    try {
+      const githubSession = await vscode.authentication.getSession(
+        "github",
+        ["read:user", "user:email"],
+        {
+          createIfNone: interactiveGithubSignin
+        }
+      );
+
+      if (githubSession?.accessToken) {
+        const exchanged = await api.exchangeGithubToken({
+          accessToken: githubSession.accessToken
+        });
+        await storeTokenBundle(context, {
+          accessToken: exchanged.accessToken,
+          refreshToken: exchanged.refreshToken,
+          expiresIn: exchanged.expiresIn
+        });
+        vscode.window.showInformationMessage("Branchline login complete via GitHub.");
+        return;
+      }
+    } catch {
+      // Fall back to device flow when GitHub auth is unavailable.
+    }
+  }
+
+  const configuredEmail = process.env.BRANCHLINE_ACCOUNT_EMAIL?.trim();
+  let email: string | undefined;
+  if (e2eEmail && e2eEmail.length > 0) {
+    email = e2eEmail;
+  } else if (configuredEmail && configuredEmail.length > 0) {
+    email = configuredEmail;
+  }
+
+  if (!email && process.env.BRANCHLINE_PROMPT_FOR_EMAIL === "1") {
+    const enteredEmail = await vscode.window.showInputBox({
+      title: "Branchline account email",
+      placeHolder: "you@company.com (optional)",
+      ignoreFocusOut: true
+    });
+    email = enteredEmail?.trim() || undefined;
+  }
+
+  const start = await api.startDeviceAuth(email ? { email, role: "member" } : { role: "member" });
+
+  if (process.env.BRANCHLINE_E2E_SKIP_BROWSER !== "1" && start.verificationRequired) {
     await vscode.env.openExternal(vscode.Uri.parse(start.verificationUriComplete));
   }
-  vscode.window.showInformationMessage(
-    `Branchline login code: ${start.userCode}. Complete verification in browser.`
-  );
+  if (start.verificationRequired) {
+    vscode.window.showInformationMessage(
+      `Branchline login code: ${start.userCode}. Complete verification in browser.`
+    );
+  } else {
+    vscode.window.showInformationMessage("Branchline login started. Waiting for token approval...");
+  }
 
   const maxAttempts = Math.ceil(start.expiresIn / Math.max(start.interval, 1));
 

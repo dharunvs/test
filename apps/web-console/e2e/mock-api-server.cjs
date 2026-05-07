@@ -380,6 +380,60 @@ const state = {
       ]
     }
   },
+  intentByTask: {
+    [TASK_ID]: [
+      {
+        eventId: "intent-5",
+        eventSeq: 5,
+        timestamp: now,
+        prompt: "Refactor auth middleware for token rotation.",
+        summary: "Updated middleware flow and token rotation handling.",
+        files: ["apps/api-server/src/modules/auth/auth.controller.ts"],
+        commitId: "abc0005",
+        redactionLevel: "none"
+      },
+      {
+        eventId: "intent-4",
+        eventSeq: 4,
+        timestamp: now,
+        prompt: "Add workspace validation before task start.",
+        summary: "Bound workspace validation before branch orchestration.",
+        files: ["apps/vscode-extension/src/commands/start-ai-task.ts"],
+        commitId: "abc0004",
+        redactionLevel: "none"
+      },
+      {
+        eventId: "intent-3",
+        eventSeq: 3,
+        timestamp: now,
+        prompt: "Add timeline view in the console.",
+        summary: "Created timeline UI for task-scoped events.",
+        files: ["apps/web-console/app/timeline/page.tsx"],
+        commitId: "abc0003",
+        redactionLevel: "none"
+      },
+      {
+        eventId: "intent-2",
+        eventSeq: 2,
+        timestamp: now,
+        prompt: "Redact secrets from prompt capture.",
+        summary: "Applied baseline redaction patterns for capture payload.",
+        files: ["apps/api-server/src/common/redaction.ts"],
+        commitId: "abc0002",
+        redactionLevel: "partial"
+      },
+      {
+        eventId: "intent-1",
+        eventSeq: 1,
+        timestamp: now,
+        prompt: "Set up initial intent capture endpoint.",
+        summary: "Stored prompt, summary, files, and commit in intent events.",
+        files: ["apps/api-server/src/modules/intent/intent.controller.ts"],
+        commitId: "abc0001",
+        redactionLevel: "none"
+      }
+    ]
+  },
   branchAutomationByBranchId: {
     [BRANCH_ID]: {
       orgId: ORG_ID,
@@ -1655,6 +1709,21 @@ const server = http.createServer(async (req, res) => {
     const taskMatch = pathname.match(/^\/v1\/tasks\/([^/]+)$/);
     if (method === "GET" && taskMatch) {
       sendJson(res, state.taskDetailsById[taskMatch[1]] ?? null);
+      return;
+    }
+
+    if (method === "GET" && pathname === "/v1/intent") {
+      const taskId = url.searchParams.get("taskId");
+      const limit = Number(url.searchParams.get("limit") ?? 5);
+      if (!taskId) {
+        sendJson(res, { message: "taskId is required" }, 400);
+        return;
+      }
+      const events = (state.intentByTask[taskId] ?? []).slice(0, Number.isFinite(limit) ? limit : 5);
+      sendJson(res, {
+        taskId,
+        events
+      });
       return;
     }
 

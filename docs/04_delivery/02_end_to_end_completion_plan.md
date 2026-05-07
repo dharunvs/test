@@ -1,5 +1,7 @@
 # Branchline End-to-End Completion Plan
 
+> Archived for v0.1 hard pivot reference. Active execution authority is `docs/05_pivot/*`.
+
 Status date: 2026-03-10  
 Scope: Current codebase -> docs-complete MVP/V1 execution  
 Execution mode: reliability-first, additive API changes, backward compatibility

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
-export DATABASE_URL="${DATABASE_URL:-postgresql://branchline:branchline@localhost:5432/branchline}"
+export DATABASE_URL="${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/branchline}"
 export REDIS_URL="${REDIS_URL:-redis://localhost:6379}"
 
 is_port_busy() {

@@ -45,16 +45,15 @@ function startMockApiServer() {
     },
     task: {
       created: 0,
-      guardrailBlocks: 0,
       protectedBranchBlocks: 0,
       branchesCreated: 0,
-      ensurePrCalls: 0,
-      intentEvents: 0,
-      commitMetadataEvents: 0,
+      intentCaptures: 0,
+      timelineReads: 0,
       latestTaskTitle: null
     },
     presenceUpdates: 0,
-    tasksById: {}
+    tasksById: {},
+    intentsByTaskId: {}
   };
 
   const server = http.createServer(async (req, res) => {
@@ -75,10 +74,22 @@ function startMockApiServer() {
         toJson(res, 200, {
           deviceCode: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
           userCode: "ABC-123",
-          verificationUri: "https://branchline.dev/device",
-          verificationUriComplete: "https://branchline.dev/device?code=ABC-123",
+          verificationUri: "http://localhost:3000/device",
+          verificationUriComplete: "http://localhost:3000/device?user_code=ABC-123",
+          verificationRequired: false,
           expiresIn: 60,
           interval: 1
+        });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/auth/github/token") {
+        toJson(res, 200, {
+          accessToken: "access-token-github",
+          refreshToken: "refresh-token-github",
+          tokenType: "Bearer",
+          expiresIn: 1,
+          refreshExpiresAt: new Date(Date.now() + 86_400_000).toISOString()
         });
         return;
       }
@@ -203,47 +214,6 @@ function startMockApiServer() {
         return;
       }
 
-      if (method === "POST" && pathname === "/v1/guardrails/evaluate") {
-        const body = await parseBody(req);
-        const task = state.tasksById[String(body.taskId ?? "")];
-        const shouldBlock = (task?.title ?? "").toLowerCase().includes("guardrail");
-
-        if (shouldBlock) {
-          state.task.guardrailBlocks += 1;
-          toJson(res, 200, {
-            status: "fail",
-            stage: "pre_apply",
-            blocking: true,
-            reasonCodes: ["rule_violation"],
-            violations: [
-              {
-                ruleKey: "no_direct_sensitive_change",
-                severity: "fail",
-                message: "Guardrail policy blocked local apply for this change set."
-              }
-            ],
-            evaluationId: randomUUID(),
-            policySetId: randomUUID(),
-            policyVersion: 1,
-            evaluatedBy: "mock-policy-engine"
-          });
-          return;
-        }
-
-        toJson(res, 200, {
-          status: "pass",
-          stage: "pre_apply",
-          blocking: false,
-          reasonCodes: [],
-          violations: [],
-          evaluationId: randomUUID(),
-          policySetId: randomUUID(),
-          policyVersion: 1,
-          evaluatedBy: "mock-policy-engine"
-        });
-        return;
-      }
-
       if (method === "POST" && pathname === "/v1/branches/create") {
         const body = await parseBody(req);
         const currentBranch = String(body.currentBranch ?? "");
@@ -251,7 +221,7 @@ function startMockApiServer() {
           baseBranch: "main",
           protectedBranches: ["main", "release"],
           autoPush: true,
-          autoPr: true,
+          autoPr: false,
           staleThresholdMinutes: 120,
           cleanupAfterMergeHours: 24
         };
@@ -287,47 +257,40 @@ function startMockApiServer() {
         return;
       }
 
-      const ensurePrMatch = pathname.match(/^\/v1\/branches\/([^/]+)\/ensure-pr$/);
-      if (method === "POST" && ensurePrMatch) {
-        state.task.ensurePrCalls += 1;
+      if (method === "POST" && pathname === "/v1/intent") {
+        state.task.intentCaptures += 1;
         const body = await parseBody(req);
-        toJson(res, 200, {
-          created: true,
-          providerMode: "github",
-          pullRequest: {
-            id: randomUUID(),
-            number: 100 + state.task.ensurePrCalls,
-            status: body.draft ? "draft" : "open"
-          },
-          orgId: IDS.ORG_ID,
-          projectId: IDS.PROJECT_ID,
-          taskId: Object.keys(state.tasksById)[Object.keys(state.tasksById).length - 1] ?? randomUUID(),
-          repositoryId: IDS.REPO_MAIN_ID
-        });
-        return;
-      }
-
-      if (method === "POST" && pathname === "/v1/intent/commit-metadata") {
-        state.task.commitMetadataEvents += 1;
-        const body = await parseBody(req);
-        toJson(res, 200, {
-          ok: true,
-          runId: body.runId,
-          taskId: body.taskId,
-          branchId: body.branchId,
-          commitSha: body.commitSha
-        });
-        return;
-      }
-
-      if (method === "POST" && pathname === "/v1/intent/events") {
-        state.task.intentEvents += 1;
-        const body = await parseBody(req);
+        const taskId = String(body.taskId ?? "");
+        const existing = state.intentsByTaskId[taskId] ?? [];
+        const event = {
+          eventId: randomUUID(),
+          eventSeq: existing.length + 1,
+          timestamp: new Date().toISOString(),
+          prompt: String(body.prompt ?? ""),
+          summary: String(body.summary ?? ""),
+          files: Array.isArray(body.files) ? body.files : [],
+          commitId: String(body.commitId ?? ""),
+          redactionLevel: "none"
+        };
+        state.intentsByTaskId[taskId] = [event, ...existing].slice(0, 20);
         toJson(res, 200, {
           accepted: true,
-          eventId: body.eventId ?? randomUUID(),
-          sequence: state.task.intentEvents,
-          idempotent: false
+          taskId,
+          eventId: event.eventId,
+          eventSeq: event.eventSeq,
+          redactionLevel: "none"
+        });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/intent") {
+        state.task.timelineReads += 1;
+        const taskId = String(url.searchParams.get("taskId") ?? "");
+        const limit = Number(url.searchParams.get("limit") ?? 5);
+        const events = (state.intentsByTaskId[taskId] ?? []).slice(0, Number.isFinite(limit) ? limit : 5);
+        toJson(res, 200, {
+          taskId,
+          events
         });
         return;
       }

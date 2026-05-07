@@ -20,11 +20,16 @@ if (!existsSync(runbookPath)) {
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 const runbook = readFileSync(runbookPath, "utf8");
 
-const requiredFeatures = Array.from({ length: 16 }, (_, index) => `F${index + 1}`);
 const features = Array.isArray(manifest.features) ? manifest.features : [];
 const executedChecks = new Set();
 
 const errors = [];
+
+if (features.length === 0) {
+  errors.push("Manifest must contain at least one feature entry");
+}
+
+const seenFeatures = new Set();
 
 function findPackageRoot(filePath) {
   let current = dirname(filePath);
@@ -71,12 +76,18 @@ function runCommand({ featureKey, command, key }) {
   }
 }
 
-for (const featureKey of requiredFeatures) {
-  const entry = features.find((item) => item?.feature === featureKey);
-  if (!entry) {
-    errors.push(`Missing manifest entry for ${featureKey}`);
+for (const entry of features) {
+  const featureKey = typeof entry?.feature === "string" ? entry.feature.trim() : "";
+  if (featureKey.length === 0) {
+    errors.push("Feature entry is missing feature key");
     continue;
   }
+
+  if (seenFeatures.has(featureKey)) {
+    errors.push(`Duplicate manifest entry for ${featureKey}`);
+    continue;
+  }
+  seenFeatures.add(featureKey);
 
   if (!entry.automated?.id || typeof entry.automated.id !== "string") {
     errors.push(`${featureKey} is missing automated.id`);
@@ -138,8 +149,8 @@ if (errors.length > 0) {
 
 if (executeChecks) {
   console.log(
-    `Feature gate manifest validated for ${requiredFeatures.length} features with ${executedChecks.size} automated checks executed.`
+    `Feature gate manifest validated for ${features.length} features with ${executedChecks.size} automated checks executed.`
   );
 } else {
-  console.log(`Feature gate manifest validated for ${requiredFeatures.length} features.`);
+  console.log(`Feature gate manifest validated for ${features.length} features.`);
 }

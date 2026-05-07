@@ -1,7 +1,7 @@
 {
   "name": "branchline-vscode-extension",
   "displayName": "Branchline",
-  "description": "AI-native team coding coordination for VS Code",
+  "description": "AI intent timeline capture for VS Code",
   "version": "0.1.0",
   "publisher": "branchline",
   "engines": {
@@ -14,52 +14,10 @@
     "onCommand:branchline.login",
     "onCommand:branchline.bindWorkspace",
     "onCommand:branchline.startAiTask",
-    "onCommand:branchline.createHandoff",
-    "onCommand:branchline.acknowledgeHandoff",
-    "onCommand:branchline.viewReplay",
-    "onCommand:branchline.viewTimeline",
-    "onCommand:branchline.claimFileOwnership",
-    "onView:branchline.timelineView",
-    "onView:branchline.activityView",
-    "onView:branchline.conflictsView",
-    "onView:branchline.handoffsView",
-    "onView:branchline.replayView"
+    "onCommand:branchline.viewTimeline"
   ],
   "main": "./dist/extension.js",
   "contributes": {
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "branchline",
-          "title": "Branchline",
-          "icon": "resources/branchline.svg"
-        }
-      ]
-    },
-    "views": {
-      "branchline": [
-        {
-          "id": "branchline.timelineView",
-          "name": "Timeline"
-        },
-        {
-          "id": "branchline.activityView",
-          "name": "Live Activity"
-        },
-        {
-          "id": "branchline.conflictsView",
-          "name": "Conflict Center"
-        },
-        {
-          "id": "branchline.handoffsView",
-          "name": "Handoffs"
-        },
-        {
-          "id": "branchline.replayView",
-          "name": "Replay"
-        }
-      ]
-    },
     "commands": [
       {
         "command": "branchline.login",
@@ -74,94 +32,16 @@
         "title": "Branchline: Start AI Task"
       },
       {
-        "command": "branchline.createHandoff",
-        "title": "Branchline: Create Handoff"
-      },
-      {
-        "command": "branchline.acknowledgeHandoff",
-        "title": "Branchline: Acknowledge Handoff"
-      },
-      {
-        "command": "branchline.viewReplay",
-        "title": "Branchline: View Replay"
-      },
-      {
         "command": "branchline.viewTimeline",
         "title": "Branchline: View Timeline"
-      },
-      {
-        "command": "branchline.claimFileOwnership",
-        "title": "Branchline: Claim File Ownership"
-      },
-      {
-        "command": "branchline.timeline.refresh",
-        "title": "Branchline: Refresh Timeline"
-      },
-      {
-        "command": "branchline.activity.refresh",
-        "title": "Branchline: Refresh Live Activity"
-      },
-      {
-        "command": "branchline.conflicts.refresh",
-        "title": "Branchline: Refresh Conflict Center"
-      },
-      {
-        "command": "branchline.handoffs.refresh",
-        "title": "Branchline: Refresh Handoffs"
-      },
-      {
-        "command": "branchline.replay.refresh",
-        "title": "Branchline: Refresh Replay"
-      },
-      {
-        "command": "branchline.timeline.setFilter",
-        "title": "Branchline: Set Timeline Filter"
-      },
-      {
-        "command": "branchline.conflicts.dismiss",
-        "title": "Branchline: Dismiss Conflict"
-      },
-      {
-        "command": "branchline.conflicts.openFile",
-        "title": "Branchline: Open Conflict File"
-      },
-      {
-        "command": "branchline.replay.markPosition",
-        "title": "Branchline: Mark Replay Position"
       }
-    ],
-    "menus": {
-      "view/title": [
-        {
-          "command": "branchline.timeline.refresh",
-          "when": "view == branchline.timelineView",
-          "group": "navigation"
-        },
-        {
-          "command": "branchline.activity.refresh",
-          "when": "view == branchline.activityView",
-          "group": "navigation"
-        },
-        {
-          "command": "branchline.conflicts.refresh",
-          "when": "view == branchline.conflictsView",
-          "group": "navigation"
-        },
-        {
-          "command": "branchline.handoffs.refresh",
-          "when": "view == branchline.handoffsView",
-          "group": "navigation"
-        },
-        {
-          "command": "branchline.replay.refresh",
-          "when": "view == branchline.replayView",
-          "group": "navigation"
-        }
-      ]
-    }
+    ]
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
+    "build:bundle": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node18 --external:vscode --outfile=dist/extension.js --sourcemap",
+    "build": "pnpm run clean && pnpm run build:types && pnpm run build:bundle",
     "dev": "tsc -w -p tsconfig.json",
     "lint": "eslint \"src/**/*.ts\"",
     "e2e": "pnpm build && node ./e2e/run.cjs",
@@ -177,6 +57,7 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "esbuild": "^0.25.11",
     "@vscode/test-electron": "^2.5.2",
     "glob": "^11.0.3",
     "mocha": "^11.7.2",

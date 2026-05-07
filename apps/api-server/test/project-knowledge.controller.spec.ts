@@ -131,7 +131,7 @@ describe("ProjectKnowledgeController", () => {
           baseVersion: 1
         })
       },
-      $transaction: vi.fn(async (callback: (tx: any) => Promise<void>) => callback(tx)),
+      $transaction: vi.fn(async (callback: (tx: unknown) => Promise<void>) => callback(tx)),
       auditLog: auditLogMock()
     } as unknown as PrismaService;
 
@@ -253,7 +253,7 @@ describe("ProjectKnowledgeController", () => {
             revision: 1
           })
       },
-      $transaction: vi.fn(async (callback: (tx: any) => Promise<void>) => callback(tx)),
+      $transaction: vi.fn(async (callback: (tx: unknown) => Promise<void>) => callback(tx)),
       auditLog: auditLogMock()
     } as unknown as PrismaService;
 

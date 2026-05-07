@@ -27,6 +27,15 @@ const logoutSchema = z.object({
   refreshToken: z.string().min(10)
 });
 
+const githubExchangeSchema = z.object({
+  code: z.string().min(10),
+  redirectUri: z.string().url()
+});
+
+const githubTokenSchema = z.object({
+  accessToken: z.string().min(20)
+});
+
 @Controller("auth")
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
@@ -78,6 +87,34 @@ export class AuthController {
   logout(@Body() body: unknown) {
     const input = logoutSchema.parse(body);
     return this.authService.logout(input.refreshToken);
+  }
+
+  @Public()
+  @Post("github/exchange")
+  exchangeGithubOAuthCode(
+    @Body() body: unknown,
+    @Headers("user-agent") userAgent?: string,
+    @Headers("x-forwarded-for") ipAddress?: string
+  ) {
+    const input = githubExchangeSchema.parse(body);
+    return this.authService.exchangeGithubOAuthCode(input, {
+      userAgent,
+      ipAddress
+    });
+  }
+
+  @Public()
+  @Post("github/token")
+  exchangeGithubAccessToken(
+    @Body() body: unknown,
+    @Headers("user-agent") userAgent?: string,
+    @Headers("x-forwarded-for") ipAddress?: string
+  ) {
+    const input = githubTokenSchema.parse(body);
+    return this.authService.exchangeGithubAccessToken(input, {
+      userAgent,
+      ipAddress
+    });
   }
 
   @Get("me")

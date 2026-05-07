@@ -6,10 +6,18 @@ export interface EffectiveRedactionPolicy {
   redactionPatterns: string[];
 }
 
+const BASELINE_REDACTION_PATTERNS = [
+  "[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}",
+  "(?:api[_-]?key|token|secret|password)\\s*[:=]\\s*[^\\s,;]+",
+  "(?:sk|rk|pk)-[A-Za-z0-9]{16,}",
+  "gh[pousr]_[A-Za-z0-9]{20,}",
+  "AKIA[0-9A-Z]{16}"
+];
+
 const DEFAULT_REDACTION_POLICY: EffectiveRedactionPolicy = {
   capturePromptText: true,
   captureCodeSnippets: true,
-  redactionPatterns: []
+  redactionPatterns: BASELINE_REDACTION_PATTERNS
 };
 
 const PROMPT_KEY_MATCH = /(prompt|instruction|system_message|user_message|assistant_message)/i;
@@ -32,6 +40,18 @@ function normalizePatterns(value: unknown): string[] {
     .map((item) => item.trim())
     .filter((item) => item.length > 0)
     .slice(0, 50);
+}
+
+function withBaselinePatterns(patterns: string[]): string[] {
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  for (const pattern of [...BASELINE_REDACTION_PATTERNS, ...patterns]) {
+    if (!seen.has(pattern)) {
+      merged.push(pattern);
+      seen.add(pattern);
+    }
+  }
+  return merged;
 }
 
 function applyPatternRedaction(value: string, patterns: string[]): { value: string; redacted: boolean } {
@@ -78,7 +98,7 @@ export async function resolveRedactionPolicy(
   return {
     capturePromptText: policy.capturePromptText,
     captureCodeSnippets: policy.captureCodeSnippets,
-    redactionPatterns: normalizePatterns(policy.redactionPatterns)
+    redactionPatterns: withBaselinePatterns(normalizePatterns(policy.redactionPatterns))
   };
 }
 

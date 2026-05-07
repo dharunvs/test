@@ -25,7 +25,7 @@
     "mvp:gate:staging": "node scripts/mvp-gate-staging.mjs",
     "mvp:gate:live": "node scripts/mvp-gate-live.mjs",
     "mvp:signoff:iteration": "node scripts/run-mvp-signoff-iteration.mjs",
-    "e2e:web": "pnpm --filter @branchline/web-console e2e",
+    "e2e:web": "pnpm --filter @branchline/web-console e2e -- e2e/smoke.e2e.ts",
     "e2e:extension": "pnpm --filter branchline-vscode-extension e2e",
     "e2e": "pnpm e2e:web && pnpm e2e:extension",
     "test": "turbo run test",
@@ -38,7 +38,9 @@
     "e2e:extension:live": "pnpm --filter branchline-vscode-extension e2e:live",
     "e2e:live:stack": "node scripts/run-live-e2e-tier.mjs",
     "mvp:pilot-flow:staging": "node scripts/run-mvp-pilot-flow-staging.mjs",
-    "mvp:checks:staging": "node scripts/check-mvp-staging-thresholds.mjs"
+    "mvp:checks:staging": "node scripts/check-mvp-staging-thresholds.mjs",
+    "benchmark:intent-read": "node scripts/benchmark-intent-read.mjs",
+    "smoke:wedge": "pnpm --filter @branchline/api-server exec vitest run test/intent.controller.spec.ts && pnpm --filter @branchline/web-console e2e -- e2e/smoke.e2e.ts && pnpm --filter branchline-vscode-extension e2e"
   },
   "devDependencies": {
     "@eslint/js": "^9.22.0",

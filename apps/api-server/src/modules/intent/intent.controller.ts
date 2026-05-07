@@ -1,6 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Post, Query } from "@nestjs/common";
 import { InjectQueue } from "@nestjs/bullmq";
-import { eventEnvelopeSchema } from "@branchline/shared-events";
 import { Prisma } from "@prisma/client";
 import { Queue } from "bullmq";
 import { z } from "zod";
@@ -11,76 +10,83 @@ import { reliableQueueOptions } from "../../common/queue-options.js";
 import { applyRedactionPolicy, resolveRedactionPolicy } from "../../common/redaction.js";
 import { Roles } from "../auth/roles.decorator.js";
 
-const timelineQuerySchema = z.object({
+const createIntentSchema = z.object({
   taskId: z.string().uuid(),
-  limit: z.coerce.number().int().positive().max(500).default(200),
-  includeRelated: z.coerce.boolean().default(false)
+  prompt: z.string().trim().min(1).max(20_000),
+  summary: z.string().trim().min(1).max(20_000),
+  files: z.array(z.string().trim().min(1).max(500)).max(200),
+  commitId: z.string().trim().min(1).max(200)
 });
 
-const commitMetadataSchema = z.object({
-  orgId: z.string().uuid(),
-  projectId: z.string().uuid(),
+const listIntentQuerySchema = z.object({
   taskId: z.string().uuid(),
-  branchId: z.string().uuid().optional(),
-  runId: z.string().uuid(),
-  intentId: z.string().uuid(),
-  commitSha: z.string().min(7),
-  provider: z.string().default("extension"),
-  model: z.string().default("local"),
-  inputTokens: z.number().int().nonnegative().optional(),
-  outputTokens: z.number().int().nonnegative().optional(),
-  latencyMs: z.number().int().nonnegative().optional()
+  limit: z.coerce.number().int().positive().max(50).default(5)
 });
+
+const intentPayloadSchema = z.object({
+  prompt: z.string().optional(),
+  summary: z.string().optional(),
+  files: z.array(z.string()).optional(),
+  commitId: z.string().optional()
+});
+
+function normalizeFiles(files: string[]): string[] {
+  return Array.from(
+    new Set(
+      files
+        .map((file) => file.trim())
+        .filter((file) => file.length > 0)
+        .slice(0, 200)
+    )
+  );
+}
 
 @Controller("intent")
 export class IntentController {
   constructor(
     private readonly prisma: PrismaService,
-    @InjectQueue("queue.intent.normalize") private readonly intentNormalizeQueue: Queue,
-    @InjectQueue("queue.analytics.rollup") private readonly analyticsQueue: Queue
+    @InjectQueue("queue.intent.normalize") private readonly intentNormalizeQueue: Queue
   ) {}
 
   @Roles("owner", "admin", "member")
-  @Post("events")
-  async ingest(@Body() body: unknown) {
-    const envelope = eventEnvelopeSchema.parse(body);
-
-    if (!envelope.context.taskId) {
-      throw new BadRequestException("context.taskId is required for intent events");
-    }
-
-    const taskId = envelope.context.taskId;
-    const branchId = envelope.context.branchId;
-
-    const existing = await this.prisma.intentEvent.findUnique({
+  @Post()
+  async create(@Body() body: unknown) {
+    const input = createIntentSchema.parse(body);
+    const task = await this.prisma.task.findUnique({
       where: {
-        id: envelope.eventId
+        id: input.taskId
+      },
+      select: {
+        id: true,
+        orgId: true,
+        projectId: true
       }
     });
 
-    if (existing) {
-      return {
-        accepted: true,
-        eventId: envelope.eventId,
-        sequence: Number(existing.eventSeq),
-        idempotent: true
-      };
+    if (!task) {
+      throw new BadRequestException("Task not found for intent capture");
     }
 
-    const redactionPolicy = await resolveRedactionPolicy(this.prisma, envelope.orgId);
-    const sanitizedEnvelopePayload = applyRedactionPolicy({
-      payload: envelope.payload,
+    const redactionPolicy = await resolveRedactionPolicy(this.prisma, task.orgId);
+    const sanitized = applyRedactionPolicy({
+      payload: {
+        prompt: input.prompt,
+        summary: input.summary,
+        files: normalizeFiles(input.files),
+        commitId: input.commitId
+      },
       policy: redactionPolicy
     });
 
-    let nextSeq = 0;
+    let intentEventId = "";
+    let eventSeq = 0;
 
     try {
-      nextSeq = await this.prisma.$transaction(
+      const created = await this.prisma.$transaction(
         async (tx) => {
           const latest = await tx.intentEvent.findFirst({
             where: {
-              taskId
+              taskId: task.id
             },
             orderBy: {
               eventSeq: "desc"
@@ -90,331 +96,99 @@ export class IntentController {
             }
           });
 
-          const computedNextSeq = Number(latest?.eventSeq ?? 0n) + 1;
-          const requestedSeq = envelope.sequence ?? computedNextSeq;
-
-          if (envelope.sequence !== undefined && envelope.sequence < computedNextSeq) {
-            throw new BadRequestException(
-              `Event sequence ${envelope.sequence} is stale. Next expected sequence is ${computedNextSeq}`
-            );
-          }
-
-          await tx.intentEvent.create({
+          const nextSeq = Number(latest?.eventSeq ?? 0n) + 1;
+          const createdEvent = await tx.intentEvent.create({
             data: {
-              id: envelope.eventId,
-              orgId: envelope.orgId,
-              projectId: envelope.projectId,
-              taskId,
-              branchId,
-              actorUserId: envelope.actor.userId,
-              source: envelope.source,
-              eventType: envelope.type,
-              eventSeq: BigInt(requestedSeq),
-              payload: toJson(sanitizedEnvelopePayload.payload),
-              redactionLevel: sanitizedEnvelopePayload.redactionLevel,
-              occurredAt: new Date(envelope.timestamp)
+              orgId: task.orgId,
+              projectId: task.projectId,
+              taskId: task.id,
+              source: "extension",
+              eventType: "intent.captured",
+              eventSeq: BigInt(nextSeq),
+              payload: toJson(sanitized.payload),
+              redactionLevel: sanitized.redactionLevel,
+              occurredAt: new Date()
+            },
+            select: {
+              id: true,
+              eventSeq: true
             }
           });
 
-          return requestedSeq;
+          return {
+            id: createdEvent.id,
+            eventSeq: Number(createdEvent.eventSeq)
+          };
         },
         {
           isolationLevel: Prisma.TransactionIsolationLevel.Serializable
         }
       );
-    } catch (error) {
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
 
+      intentEventId = created.id;
+      eventSeq = created.eventSeq;
+    } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === "P2002" &&
-        Array.isArray(error.meta?.target)
+        Array.isArray(error.meta?.target) &&
+        error.meta.target.join(",").includes("eventSeq")
       ) {
-        const target = error.meta.target.join(",");
-        if (target.includes("id")) {
-          return {
-            accepted: true,
-            eventId: envelope.eventId,
-            sequence: envelope.sequence,
-            idempotent: true
-          };
-        }
-
-        if (target.includes("eventSeq")) {
-          throw new BadRequestException(
-            "Event sequence conflict detected. Retry with the latest sequence from /intent/timeline."
-          );
-        }
+        throw new BadRequestException("Intent sequence conflict detected. Retry request.");
       }
-
       throw error;
     }
 
-    await this.intentNormalizeQueue.add("normalize", {
-      eventId: envelope.eventId,
-      taskId,
-      projectId: envelope.projectId,
-      orgId: envelope.orgId
-    }, reliableQueueOptions);
-
-    await this.analyticsQueue.add("rollup", {
-      orgId: envelope.orgId,
-      projectId: envelope.projectId,
-      taskId,
-      source: "intent_event"
-    }, reliableQueueOptions);
+    await this.intentNormalizeQueue.add(
+      "normalize",
+      {
+        eventId: intentEventId,
+        taskId: task.id,
+        projectId: task.projectId,
+        orgId: task.orgId
+      },
+      reliableQueueOptions
+    );
 
     return {
       accepted: true,
-      eventId: envelope.eventId,
-      sequence: nextSeq,
-      idempotent: false
+      taskId: task.id,
+      eventId: intentEventId,
+      eventSeq,
+      redactionLevel: sanitized.redactionLevel
     };
   }
 
   @Roles("owner", "admin", "member", "viewer")
-  @Get("timeline")
-  async timeline(@Query() query: Record<string, unknown>) {
-    const input = timelineQuerySchema.parse(query);
-
-    const intentEvents = await this.prisma.intentEvent.findMany({
+  @Get()
+  async list(@Query() query: Record<string, unknown>) {
+    const input = listIntentQuerySchema.parse(query);
+    const events = await this.prisma.intentEvent.findMany({
       where: {
         taskId: input.taskId
       },
       orderBy: {
-        eventSeq: "asc"
+        eventSeq: "desc"
       },
       take: input.limit
     });
 
-    if (!input.includeRelated) {
-      return intentEvents;
-    }
-
-    const [taskDecisions, activityEvents, qualityRuns, handoffs, conflicts, branches] = await Promise.all([
-      this.prisma.taskDecision.findMany({
-        where: {
-          taskId: input.taskId
-        },
-        orderBy: {
-          createdAt: "asc"
-        },
-        take: input.limit
-      }),
-      this.prisma.activityEvent.findMany({
-        where: {
-          taskId: input.taskId
-        },
-        orderBy: {
-          occurredAt: "asc"
-        },
-        take: input.limit
-      }),
-      this.prisma.qualityGateRun.findMany({
-        where: {
-          taskId: input.taskId
-        },
-        include: {
-          checks: true
-        },
-        orderBy: {
-          createdAt: "asc"
-        },
-        take: input.limit
-      }),
-      this.prisma.handoffPacket.findMany({
-        where: {
-          taskId: input.taskId
-        },
-        include: {
-          acks: true
-        },
-        orderBy: {
-          createdAt: "asc"
-        },
-        take: input.limit
-      }),
-      this.prisma.conflictEvent.findMany({
-        where: {
-          OR: [{ taskId: input.taskId }, { otherTaskId: input.taskId }]
-        },
-        orderBy: {
-          createdAt: "asc"
-        },
-        take: input.limit
-      }),
-      this.prisma.branch.findMany({
-        where: {
-          taskId: input.taskId
-        },
-        include: {
-          pullRequests: {
-            orderBy: {
-              createdAt: "asc"
-            }
-          }
-        },
-        orderBy: {
-          createdAt: "asc"
-        },
-        take: input.limit
+    return {
+      taskId: input.taskId,
+      events: events.map((event) => {
+        const payload = intentPayloadSchema.safeParse(event.payload);
+        return {
+          eventId: event.id,
+          eventSeq: Number(event.eventSeq),
+          timestamp: event.occurredAt.toISOString(),
+          prompt: payload.success ? payload.data.prompt ?? "" : "",
+          summary: payload.success ? payload.data.summary ?? "" : "",
+          files: payload.success ? payload.data.files ?? [] : [],
+          commitId: payload.success ? payload.data.commitId ?? "" : "",
+          redactionLevel: event.redactionLevel
+        };
       })
-    ]);
-
-    const timeline = [
-      ...intentEvents.map((event) => ({
-        timestamp: event.occurredAt,
-        type: event.eventType,
-        category: "intent",
-        id: event.id,
-        data: event
-      })),
-      ...taskDecisions.map((decision) => ({
-        timestamp: decision.createdAt,
-        type: `decision.${decision.decisionType}`,
-        category: "decision",
-        id: decision.id,
-        data: decision
-      })),
-      ...activityEvents.map((event) => ({
-        timestamp: event.occurredAt,
-        type: event.eventType,
-        category: "activity",
-        id: event.id,
-        data: event
-      })),
-      ...qualityRuns.map((run) => ({
-        timestamp: run.createdAt,
-        type: `quality.${run.status}`,
-        category: "quality",
-        id: run.id,
-        data: run
-      })),
-      ...handoffs.map((handoff) => ({
-        timestamp: handoff.createdAt,
-        type: "handoff.created",
-        category: "handoff",
-        id: handoff.id,
-        data: handoff
-      })),
-      ...conflicts.map((conflict) => ({
-        timestamp: conflict.createdAt,
-        type: `conflict.${conflict.severity}`,
-        category: "conflict",
-        id: conflict.id,
-        data: conflict
-      })),
-      ...branches.map((branch) => ({
-        timestamp: branch.createdAt,
-        type: "branch.created",
-        category: "branch",
-        id: branch.id,
-        data: branch
-      }))
-    ].sort((left, right) => left.timestamp.getTime() - right.timestamp.getTime());
-
-    return {
-      taskId: input.taskId,
-      counts: {
-        intentEvents: intentEvents.length,
-        decisions: taskDecisions.length,
-        activityEvents: activityEvents.length,
-        qualityRuns: qualityRuns.length,
-        handoffs: handoffs.length,
-        conflicts: conflicts.length,
-        branches: branches.length
-      },
-      timeline
-    };
-  }
-
-  @Roles("owner", "admin", "member")
-  @Post("commit-metadata")
-  async ingestCommitMetadata(@Body() body: unknown) {
-    const input = commitMetadataSchema.parse(body);
-
-    const [task, branch] = await Promise.all([
-      this.prisma.task.findUnique({
-        where: {
-          id: input.taskId
-        }
-      }),
-      input.branchId
-        ? this.prisma.branch.findUnique({
-            where: {
-              id: input.branchId
-            }
-          })
-        : Promise.resolve(null)
-    ]);
-
-    if (!task) {
-      throw new BadRequestException("Task not found for commit metadata ingestion");
-    }
-
-    if (input.branchId && !branch) {
-      throw new BadRequestException("Branch not found for commit metadata ingestion");
-    }
-
-    if (task.projectId !== input.projectId || task.orgId !== input.orgId) {
-      throw new BadRequestException("Task scope mismatch for org/project");
-    }
-
-    const run = await this.prisma.aiRun.upsert({
-      where: {
-        id: input.runId
-      },
-      update: {
-        branchId: input.branchId,
-        provider: input.provider,
-        model: input.model,
-        inputTokens: input.inputTokens,
-        outputTokens: input.outputTokens,
-        latencyMs: input.latencyMs,
-        status: "completed",
-        endedAt: new Date()
-      },
-      create: {
-        id: input.runId,
-        orgId: input.orgId,
-        projectId: input.projectId,
-        taskId: input.taskId,
-        branchId: input.branchId,
-        provider: input.provider,
-        model: input.model,
-        inputTokens: input.inputTokens,
-        outputTokens: input.outputTokens,
-        latencyMs: input.latencyMs,
-        status: "completed",
-        startedAt: new Date(),
-        endedAt: new Date()
-      }
-    });
-
-    await this.prisma.taskDecision.create({
-      data: {
-        orgId: input.orgId,
-        projectId: input.projectId,
-        taskId: input.taskId,
-        decisionType: "commit_metadata_linked",
-        summary: `Commit ${input.commitSha.slice(0, 12)} linked to run ${input.runId}`,
-        rationale: JSON.stringify({
-          commitSha: input.commitSha,
-          runId: input.runId,
-          intentId: input.intentId,
-          branchId: input.branchId
-        })
-      }
-    });
-
-    return {
-      ok: true,
-      runId: run.id,
-      taskId: input.taskId,
-      branchId: input.branchId,
-      commitSha: input.commitSha
     };
   }
 }
+
